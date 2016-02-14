@@ -58,9 +58,9 @@ end
 
 # grammars for problem
 @grammar rover_grammar begin
-  start = if_statement
+  start = block
 
-  command = goleft | goright | goup | godown | sample | check | for_loop | if_statement
+  command = goleft | goright | goup | godown | sample | check | for_loop | if_statement | while_loop
   goleft = Expr(:call, :move, :rs, "West")
   goright = Expr(:call, :move, :rs, "East")
   goup = Expr(:call, :move, :rs, "North")
@@ -74,13 +74,36 @@ end
   #good_rock = Expr(:call, :check, rock) == "Good"
   #good_rock = Expr(:(==), Expr(:call, :check, :rs, rock), "Good")
 
+  while_loop = Expr(:while, not_terminated, block)
+  not_terminated = Expr(:call, :has_not_terminated, :rs)
+
   for_loop = Expr(:for, Expr(:(=), :i, Expr(:(:), 1, digit)), block)
-  while_loop = Expr(:while, false, block)
-  block[make_block] = (command)^(1:5)
+  block[make_block] = (command)^(1:9)
 
   digit = 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
   rock = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
+end
 
+# function to check if simulation terminated
+# extra condition added to make sure the loop terminates:
+# can only call this function 100 times
+@eval function has_not_terminated(rs::RS)
+  count = $(zeros(1))
+  if rs.Terminated == 0 && count[1] < 100
+    count[1] += 1
+    return true
+  else
+    count[1] = 0
+    return false
+  end
+
+  # if rs.Terminated == 1 || count[1] >= 100
+  #   count[1] = 0
+  #   return false
+  # else
+  #   count[1] += 1
+  #   return true
+  # end
 end
 
 # function to check for good rock
@@ -92,34 +115,40 @@ function is_good_rock(rs::RS, rock)
   end
 end
 
-# function to encode structure for the policy
-function policy_wrapper(rs::RS,code)
+# function 1 to encode structure for the policy
+function policy_wrapper1(rs::RS, ind::roverIndividual)
   iteration = 0
+  @eval fn(rs::RS) = $(ind.code)
 
-  while(rs.reward <= 0 || iteration < 100)
-    $(code)
+  while(rs.Terminated == 0 && iteration < 100)
+    fn(rs)
     iteration += 1
   end
+end
+
+# function 2 to encode structure for the policy
+function policy_wrapper2(rs::RS, ind::roverIndividual)
+  iteration = 0
+  @eval fn(rs::RS) = $(ind.code)
 end
 
 # function to make a RockSample copy 
 function copyRS(rs::RS)
   rs_copy = RSinit();
-  rs_copy.Rocks = rs.Rocks
-  rs_copy.Reward = 0
+  rs_copy.Rocks = rs.Rocks # don't want to reinitialize the rocks randomly every evaluation call
   return rs_copy
 end
 
 # evaluation function to determine fitness
 function evaluate!(grammar::Grammar, ind::roverIndividual, rs::RS)
-  # create world
+  # copy simulation instance
   rs = copyRS(rs);
 
   # generate code
   try
     ind.code = transform(grammar, ind)
-    @eval fn(rs::RS) = $(ind.code)
-    #@eval fn(rs::RS) = policy_wrapper(rs,ind.code)
+    @eval fn(rs::RS, ind::roverIndividual) = $(ind.code)
+    #@eval fn(rs::RS, ind::roverIndividual) = policy_wrapper1(rs, ind)
   catch e
     #if typeof(e) !== MaxWrapException
     #  Base.error_show(STDERR, e, catch_backtrace())
@@ -129,9 +158,10 @@ function evaluate!(grammar::Grammar, ind::roverIndividual, rs::RS)
   end
 
   # run code
-  fn(rs)
+  fn(rs, ind)
+
   ind.fitness = convert(Float64, rs.Reward)
-  #ind.fitness = rs.Reward
+
   return ind.fitness
 end
 
@@ -150,12 +180,13 @@ function main()
   generation = 1
 
   evaluate!(rover_grammar, pop, rs)
-  while generation < 10
+  while generation < 101
     # generate a new population (based off of fitness)
     pop = generate(rover_grammar, pop, 0.1, 0.2, 0.2, rs)
 
     # population is sorted, so first entry it the best
     fitness = pop[1].fitness
+    println("-------------------------------------------------------------")
     println("generation: $generation, $(length(pop)), max fitness=$fitness\n$(pop[1].code)")
     generation += 1
   end

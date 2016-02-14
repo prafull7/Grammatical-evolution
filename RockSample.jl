@@ -20,6 +20,7 @@ type RS
     Reward
     Rocks
     Actions
+    Terminated
 end
 # ------------------------------------------------> x axis
 #   (0,0) , (1,0), (2,0), (3,0), (4,0), (5,0) (6,0)
@@ -48,7 +49,8 @@ function RSinit()
     Actions = getActionSet(Rocks)
     Robot = RobotState(0,4)
     Belief = 0.5*ones(length(Rocks))
-    return RS(d0, Robot, Belief, Reward, Rocks, Actions)
+    Terminated = 0
+    return RS(d0, Robot, Belief, Reward, Rocks, Actions, Terminated)
 end
 
 function getActionSet(rp)
@@ -66,6 +68,7 @@ end
 function move(RS, direction)
     # ends the game because the robot is in the exit
     if RS.Robot.x > 6
+        RS.Terminated = 1
         return "end"
     end
 
@@ -84,6 +87,7 @@ function move(RS, direction)
     if posNew.x > 6 && posNew.y >= 0 && posNew.y <= 6
         RS.Robot = posNew
         RS.Reward += 10
+        RS.Terminated = 1
         return "end"
     elseif posNew.x >= 0 && posNew.x <= 6 && posNew.y >= 0 && posNew.y <= 6
         RS.Robot = posNew
