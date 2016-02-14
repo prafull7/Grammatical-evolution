@@ -1,3 +1,6 @@
+module RockSample
+
+export RS, RSinit, move, sample, check
 
 type RobotState
     x
@@ -35,17 +38,17 @@ function RSinit()
         Rock(6,4, "Bad"), Rock(7,3, "Bad")]
     
     randomVals = rand(Bool,1,8)
-    for(i in [1:8])
-        println(randomVals[i])
+    for(i in collect(1:8))
+        #println(randomVals[i])
         if(randomVals[i] == true)
             Rocks[i].value = "Good"
         end
     end
-    Rewards = 0
+    Reward = 0
     Actions = getActionSet(Rocks)
     Robot = RobotState(0,4)
     Belief = 0.5*ones(length(Rocks))
-    return RS(d0, Robot, Belief, Rewards, Rocks, Actions)
+    return RS(d0, Robot, Belief, Reward, Rocks, Actions)
 end
 
 function getActionSet(rp)
@@ -61,6 +64,11 @@ end
 # Moving West => x -= 1
 # Moving East => x += 1
 function move(RS, direction)
+    # ends the game because the robot is in the exit
+    if RS.Robot.x > 6
+        return "end"
+    end
+
     posNew = deepcopy(RS.Robot)
     if direction == "North"
         posNew.y -= 1
@@ -72,14 +80,17 @@ function move(RS, direction)
         posNew.x += 1
     end
     
-    if posNew.x > 6   # ends the game because the robot is in the end zone 
+    # ends the game because the robot is in the exit
+    if posNew.x > 6 && posNew.y >= 0 && posNew.y <= 6
+        RS.Robot = posNew
         RS.Reward += 10
-        return "end";
-    elseif posNew.x >= 0 && posNew.x <= 6 && posNew.y >= 0
-        RS.Robot = posNew;
+        return "end"
+    elseif posNew.x >= 0 && posNew.x <= 6 && posNew.y >= 0 && posNew.y <= 6
+        RS.Robot = posNew
     else
         RS.Reward -= 100
     end
+    return
 end
 
 function sample(RS)
@@ -93,10 +104,10 @@ function sample(RS)
             end
         end
     end
-    println(RS.Reward)
+
 end
 
-# RS is the rocksample instance and number is the numberth 
+# RS is the rocksample instance and number is the number of the
 # rock that we want to sample ranging from 1:8
 function check(RS, number)
     rock = RS.Rocks[number]
@@ -113,3 +124,5 @@ function check(RS, number)
         return rock.value
     end            
 end
+
+end # module 
