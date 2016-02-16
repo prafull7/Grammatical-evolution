@@ -34,9 +34,9 @@ end
 
 function RSinit()
     d0 = 20
-    Rocks = [Rock(1,2, "Bad"), Rock(2,6, "Bad"), Rock(3,3, "Bad"), 
-        Rock(3,4, "Bad"), Rock(4,7, "Bad"), Rock(6,1, "Bad"), 
-        Rock(6,4, "Bad"), Rock(7,3, "Bad")]
+    Rocks = [Rock(0,5, "Bad"), Rock(1,0, "Bad"), Rock(2,2, "Bad"), 
+        Rock(2,6, "Bad"), Rock(3,2, "Bad"), Rock(3,5, "Bad"), 
+        Rock(5,1, "Bad"), Rock(6,3, "Bad")]
     
     randomVals = rand(Bool,1,8)
     for(i in collect(1:8))
@@ -49,7 +49,7 @@ function RSinit()
     Actions = getActionSet(Rocks)
     Robot = RobotState(0,4)
     Belief = 0.5*ones(length(Rocks))
-    Terminated = 0
+    Terminated = false
     return RS(d0, Robot, Belief, Reward, Rocks, Actions, Terminated)
 end
 
@@ -68,7 +68,7 @@ end
 function move(RS, direction)
     # ends the game because the robot is in the exit
     if RS.Robot.x > 6
-        RS.Terminated = 1
+        RS.Terminated = true
         return "end"
     end
 
@@ -87,7 +87,7 @@ function move(RS, direction)
     if posNew.x > 6 && posNew.y >= 0 && posNew.y <= 6
         RS.Robot = posNew
         RS.Reward += 10
-        RS.Terminated = 1
+        RS.Terminated = true
         return "end"
     elseif posNew.x >= 0 && posNew.x <= 6 && posNew.y >= 0 && posNew.y <= 6
         RS.Robot = posNew
