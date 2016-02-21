@@ -1,6 +1,6 @@
 module RockSample
 
-export RS, RSinit, move, sample, check
+export RS, RSinit, move, sample, check, RobotState
 
 type RobotState
     x
@@ -32,6 +32,7 @@ end
 #   (0,6) , (1,6), (2,6), (3,6), (4,6), (5,6) (6,6)
 
 
+
 function RSinit()
     d0 = 20
     Rocks = [Rock(0,5, "Bad"), Rock(1,0, "Bad"), Rock(2,2, "Bad"), 
@@ -52,6 +53,7 @@ function RSinit()
     Terminated = false
     return RS(d0, Robot, Belief, Reward, Rocks, Actions, Terminated)
 end
+
 
 function getActionSet(rp)
     A = ["North" "South" "East" "West" "Sample"]
@@ -127,6 +129,30 @@ function check(RS, number)
     else
         return rock.value
     end            
+end
+
+# Function that returns the max reward possible in the input rocksample instance
+function getMaxReward(RS)
+    maxR = 10
+    for r in RS.Rocks
+        if r.value == "Good"
+            maxR += 10
+        end
+    end
+    return maxR
+end
+
+# Function that returns the minimum reward possible in the input rocksample instance
+function getMinReward(RS)
+    # This case assumes that the robot might never exit the environment
+    # Add 10 to the output if robot will exit the environement for sure.
+    minR = 0
+    for r in RS.Rocks
+        if r.value == "Bad"
+            minR -= 10
+        end
+    end
+    return minR
 end
 
 end # module 
