@@ -5,7 +5,8 @@ using GrammaticalEvolution
 import GrammaticalEvolution.evaluate!
 import GrammaticalEvolution.isless
 using RockSample
-import Base
+
+println("Loaded libraries")
 
 # define a rover individual
 type roverIndividual <: Individual
@@ -62,7 +63,9 @@ convert_number(lst) = float(join(lst))
 @grammar rover_grammar begin
   start = decimal
 
-  command = goleft | goright | goup | godown | sample | check | for_loop | if_statement
+  block[make_block] = (command)^(1:8)
+
+  command = goleft | goright | goup | godown | sample | check | if_statement #| for_loop
   goleft = Expr(:call, :move, :rs, "West")
   goright = Expr(:call, :move, :rs, "East")
   goup = Expr(:call, :move, :rs, "North")
@@ -80,16 +83,13 @@ convert_number(lst) = float(join(lst))
   not_terminated = Expr(:call, :has_not_terminated, :rs)
 
   for_loop = Expr(:for, Expr(:(=), :i, Expr(:(:), 1, for_digit)), block)
-  block[make_block] = (command)^(1:8)
-
-  for_digit = 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
-
-  digit = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
   rock = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
 
-  reduced_digit = 0 | 1 | 2 | 3 | 4 | 5
+  for_digit = 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
+  digit = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
+  reduced_digit = 5 | 6 | 7 | 8 | 9
 
-  decimal[convert_number] = 0 + '.' + digit + digit
+  decimal[convert_number] = 0 + '.' + digit + digit + digit + digit
 end
 
 # function to check if simulation terminated
@@ -134,6 +134,13 @@ function policy_wrapper2(rs::RS, ind::roverIndividual)
   @eval fn(rs::RS) = $(ind.code)
   lambda = fn(rs)
 
+  #println(lambda)
+
+  if typeof(lambda) != Float64
+    rs.Reward = -Inf
+    return
+  end
+
   is_collected = falses(8)
 
   while(!rs.Terminated)
@@ -149,12 +156,54 @@ function policy_wrapper2(rs::RS, ind::roverIndividual)
 
     # if none, move to exit
     else
-      move(rs,"East")
+      while(!rs.Terminated)
+        move(rs,"East")
+      end
     end
 
     iteration += 1
   end
 
+end
+
+# function 3 to encode structure for the policy
+function policy_wrapper3(rs::RS, ind::roverIndividual)
+  iteration = 0
+  @eval fn(rs::RS) = $(ind.code)
+  lambda = fn(rs)
+
+  #println(lambda)
+
+  if typeof(lambda) != Float64
+    rs.Reward = -Inf
+    return
+  end
+
+  is_collected = falses(8)
+  steplimit = 25
+
+  while(!rs.Terminated && rs.Steps <= steplimit)
+    # find closest rock that hasn't been collected and is above threshold
+    nearest_rock = find_valid_rock(rs, is_collected, lambda)
+
+    # make sure there is a valid rock
+    if nearest_rock > 0
+
+      # collect rock
+      is_collected[nearest_rock] = collect_rock(rs, nearest_rock, steplimit)
+
+    # if none, move to exit
+    else
+      #while(!rs.Terminated && rs.Steps <= limit)
+        move(rs,"East")
+      #  iteration += 1
+      #end
+    end
+
+    iteration += 1
+  end
+
+  return
 end
 
 # function to find the closest rock that 
@@ -179,11 +228,12 @@ function find_valid_rock(rs::RS, is_collected, lambda)
   else
     return indmin(distances)
   end
+  
 end
 
 # function to move robot to rock to sample it
-function collect_rock(rs::RS, rock)
-  while(true)
+function collect_rock(rs::RS, rock, steplimit)
+  while(rs.Steps <= steplimit)
 
     dx = rs.Robot.x - rs.Rocks[rock].x
     dy = rs.Robot.y - rs.Rocks[rock].y
@@ -200,10 +250,12 @@ function collect_rock(rs::RS, rock)
 
     if rs.Robot.x == rs.Rocks[rock].x && rs.Robot.y == rs.Rocks[rock].y
       sample(rs)
-      return
+      return true
     end
 
   end
+
+  return false
 
 end
 
@@ -215,16 +267,17 @@ function copyRS(rs::RS)
 end
 
 # evaluation function to determine fitness
-function evaluate!(grammar::Grammar, ind::roverIndividual, rs::RS)
+function evaluate!(grammar::Grammar, ind::roverIndividual)
   # copy simulation instance
-  rs = copyRS(rs);
+  # rs = copyRS(rs);
 
   # generate code
   try
     ind.code = transform(grammar, ind)
     #@eval fn(rs::RS, ind::roverIndividual) = $(ind.code)
     #@eval fn(rs::RS, ind::roverIndividual) = policy_wrapper1(rs, ind)
-    @eval fn(rs::RS, ind::roverIndividual) = policy_wrapper2(rs, ind)
+    #@eval fn(rs::RS, ind::roverIndividual) = policy_wrapper2(rs, ind)
+    @eval fn(rs::RS, ind::roverIndividual) = policy_wrapper3(rs, ind)
   catch e
     #if typeof(e) !== MaxWrapException
     #  Base.error_show(STDERR, e, catch_backtrace())
@@ -233,12 +286,27 @@ function evaluate!(grammar::Grammar, ind::roverIndividual, rs::RS)
     return
   end
 
+  n_games = 50  
+  total = 0
   # run code
-  fn(rs, ind)
+  # average over multiple instances
+  for i = 1:n_games
+    # generate new instance
+    rs = RSinit();
+    max_reward = getMaxReward(rs)
 
-  ind.fitness = convert(Float64, rs.Reward)
+    # evaluate instance
+    fn(rs, ind)
 
-  return ind.fitness
+    # get reward
+    total += (rs.Reward / max_reward)
+
+  end
+
+  #ind.fitness = convert(Float64, rs.Reward) / rs.RewardMax
+  ind.fitness = total / n_games
+
+  #return ind.fitness / rs.RewardMax
 end
 
 # need to redefine 'isless' (more reward is better)
@@ -247,7 +315,8 @@ isless(ind1::roverIndividual, ind2::roverIndividual) = ind1.fitness > ind2.fitne
 function main()
 
   # create simulation instance
-  rs = RSinit();
+  #rs = RSinit();
+  #println("Max possible reward: $(rs.RewardMax)")
 
   # create population
   pop = roverPopulation(500, 500)
@@ -255,10 +324,13 @@ function main()
   fitness = 0
   generation = 1
 
-  evaluate!(rover_grammar, pop, rs)
-  while generation <= 100
+  println("Starting algorithm ...")
+
+  #evaluate!(rover_grammar, pop, rs)
+  evaluate!(rover_grammar, pop)
+  while generation <= 25
     # generate a new population (based off of fitness)
-    pop = generate(rover_grammar, pop, 0.1, 0.2, 0.2, rs)
+    pop = generate(rover_grammar, pop, 0.1, 0.2, 0.2)
 
     # population is sorted, so first entry it the best
     fitness = pop[1].fitness
@@ -266,6 +338,8 @@ function main()
     println("generation: $generation, $(length(pop)), max fitness=$fitness\n$(pop[1].code)")
     generation += 1
   end
+
+  println("Done!")
 
 end
 
