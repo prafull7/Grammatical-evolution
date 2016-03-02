@@ -8,6 +8,7 @@ export BC, BCinit, move, cooperate, call
 type RobotState
   x
   y
+  Reward
 end
 
 type BC
@@ -34,8 +35,8 @@ function BCinit()
   Reward = 0
   Terminated = false
 
-  Robot1 = RobotState(0,3)
-  Robot2 = RobotState(2,6)
+  Robot1 = RobotState(0,3,0)
+  Robot2 = RobotState(2,6,0)
   Robots = [Robot1, Robot2]
 
   return BC(d0, Robots, Reward, Terminated, Steps)
@@ -63,6 +64,7 @@ function move(BC, robot, direction)
   elseif posNew.x >= 0 && posNew.x <= 6 && posNew.y >= 0 && posNew.y <= 6
     BC.Robots[robot] = posNew
   else
+    BC.Robots[robot].Reward -= 100
     BC.Reward -= 100
   end
 
@@ -73,6 +75,8 @@ end
 function cooperate(BC)
   if BC.Robots[1].x == BC.Robots[2].x && BC.Robots[1].y == BC.Robots[2].y && BC.Robots[1].x == 6 && BC.Robots[1].y >= 0 && BC.Robots[1].y <= 6
     BC.Reward += 10
+    BC.Robots[1].Reward += 10
+    BC.Robots[2].Reward += 10
     BC.Terminated = true
     BC.Steps += 1
   else

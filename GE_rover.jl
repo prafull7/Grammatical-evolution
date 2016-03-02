@@ -4,9 +4,10 @@ push!(LOAD_PATH, "../Grammatical-evolution")
 using GrammaticalEvolution
 import GrammaticalEvolution.evaluate!
 import GrammaticalEvolution.isless
-using RockSample
+import RockSample
+import GE_PolicyFunctions
 
-println("Loaded libraries")
+println("[GE_rover] Loaded libraries")
 
 # define a rover individual
 type roverIndividual <: Individual
@@ -59,79 +60,89 @@ end
 
 convert_number(lst) = float(join(lst))
 
+function params2(a,b)
+  return a,b
+end
+
+function move(rs,direction)
+  RockSample.move(rs,direction)
+end
+
+function sample(rs)
+  RockSample.sample(rs)
+end
+
+function check(rs,rock)
+  RockSample.check(rs,rock)
+end
+
+function is_good_rock(rs,rock)
+  return GE_PolicyFunctions.is_good_rock(rs,rock)
+end
+
+function high_belief(rs,rock,threshold)
+  if rs.Belief[rock] >= threshold
+    return true
+  else
+    return false
+  end
+end
+
 # grammars for problem
 @grammar rover_grammar begin
-  start = decimal
+  start = block
 
-  block[make_block] = (command)^(1:8)
+  block[make_block] = (command)^(1:7)
 
   command = goleft | goright | goup | godown | sample | check | if_statement #| for_loop
-  goleft = Expr(:call, :move, :rs, "West")
+  params2 = Expr(:call, :params2, decimal, decimal)
+  goleft = Expr(:call, :move, :rs, "West" )
   goright = Expr(:call, :move, :rs, "East")
   goup = Expr(:call, :move, :rs, "North")
   godown = Expr(:call, :move, :rs, "South")
   sample = Expr(:call, :sample, :rs)
   check = Expr(:call, :check, :rs, rock)
 
-  if_statement = Expr(:if, condition, block, block)
-  condition = good_rock
+  if_statement = Expr(:if, condition, block)
+  condition = good_rock | high_belief
   good_rock = Expr(:call, :is_good_rock, :rs, rock)
+  belief = Expr(:call, :belief, :rs, rock, decimal)
   #good_rock = Expr(:call, :check, rock) == "Good"
-  #good_rock = Expr(:(==), Expr(:call, :check, :rs, rock), "Good")
+  #good_rock = Expr(:(.==), Expr(:call, :check, :rs, rock), "Good")
 
   while_loop = Expr(:while, not_terminated, block)
   not_terminated = Expr(:call, :has_not_terminated, :rs)
 
   for_loop = Expr(:for, Expr(:(=), :i, Expr(:(:), 1, for_digit)), block)
-  rock = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
 
+  rock = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
   for_digit = 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
   digit = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
   reduced_digit = 5 | 6 | 7 | 8 | 9
 
-  decimal[convert_number] = 0 + '.' + digit + digit + digit + digit
-end
-
-# function to check if simulation terminated
-# extra condition added to make sure the loop terminates:
-# can only call this function 100 times
-@eval function has_not_terminated(rs::RS)
-  count = $(zeros(1))
-  if !rs.Terminated && count[1] < 100
-    count[1] += 1
-    return true
-  else
-    count[1] = 0
-    return false
-  end
-end
-
-# function to check for good rock
-function is_good_rock(rs::RS, rock)
-  if check(rs, rock) == "Good"
-    return true
-  else
-    return false
-  end
+  decimal[convert_number] = 0 + '.' + digit + digit
 end
 
 # function 1 to encode structure for the policy
 # code that is evolved is run within a while loop
-function policy_wrapper1(rs::RS, ind::roverIndividual)
+function policy_wrapper1(rs::RockSample.RS, ind::roverIndividual)
   iteration = 0
-  @eval fn(rs::RS) = $(ind.code)
+  steplimit = 50
 
-  while(!rs.Terminated && iteration < 100)
+  @eval fn(rs::RockSample.RS) = $(ind.code)
+
+  while(!rs.Terminated && iteration <= 1)
     fn(rs)
     iteration += 1
   end
+  return 
 end
 
 # function 2 to encode structure for the policy
 # only a constant is evolved, which balances exploration / exploitation
-function policy_wrapper2(rs::RS, ind::roverIndividual)
+function policy_wrapper2(rs::RockSample.RS, ind::roverIndividual)
   iteration = 0
-  @eval fn(rs::RS) = $(ind.code)
+  @eval fn(rs::RockSample.RS) = $(ind.code)
   lambda = fn(rs)
 
   #println(lambda)
@@ -145,13 +156,13 @@ function policy_wrapper2(rs::RS, ind::roverIndividual)
 
   while(!rs.Terminated)
     # find closest rock that hasn't been collected and is above threshold
-    nearest_rock = find_valid_rock(rs, is_collected, lambda)
+    nearest_rock = GE_PolicyFunctions.find_valid_rock(rs, is_collected, lambda)
 
     # make sure there is a valid rock
     if nearest_rock > 0
 
       # collect rock
-      collect_rock(rs, nearest_rock)
+      GE_PolicyFunctions.collect_rock(rs, nearest_rock)
       is_collected[nearest_rock] = true
 
     # if none, move to exit
@@ -163,16 +174,14 @@ function policy_wrapper2(rs::RS, ind::roverIndividual)
 
     iteration += 1
   end
-
+  return
 end
 
 # function 3 to encode structure for the policy
-function policy_wrapper3(rs::RS, ind::roverIndividual)
-  iteration = 0
-  @eval fn(rs::RS) = $(ind.code)
+# improvements on version 2, which is based on an accuracy threshold 
+function policy_wrapper3(rs::RockSample.RS, ind::roverIndividual)
+  @eval fn(rs::RockSample.RS) = $(ind.code)
   lambda = fn(rs)
-
-  #println(lambda)
 
   if typeof(lambda) != Float64
     rs.Reward = -Inf
@@ -180,90 +189,58 @@ function policy_wrapper3(rs::RS, ind::roverIndividual)
   end
 
   is_collected = falses(8)
-  steplimit = 25
+  steplimit = 50
 
   while(!rs.Terminated && rs.Steps <= steplimit)
     # find closest rock that hasn't been collected and is above threshold
-    nearest_rock = find_valid_rock(rs, is_collected, lambda)
+    nearest_rock = GE_PolicyFunctions.find_valid_rock(rs, is_collected, lambda)
 
     # make sure there is a valid rock
     if nearest_rock > 0
 
       # collect rock
-      is_collected[nearest_rock] = collect_rock(rs, nearest_rock, steplimit)
+      is_collected[nearest_rock] = GE_PolicyFunctions.collect_rock(rs, nearest_rock, steplimit)
 
     # if none, move to exit
     else
-      #while(!rs.Terminated && rs.Steps <= limit)
-        move(rs,"East")
-      #  iteration += 1
-      #end
+      RockSample.move(rs,"East")
     end
 
-    iteration += 1
   end
-
   return
 end
 
-# function to find the closest rock that 
-function find_valid_rock(rs::RS, is_collected, lambda)
-  distances = Inf*ones(8)
+# function 4 to encode structure for the policy
+# parameterized by belief threshold 
+function policy_wrapper4(rs::RockSample.RS, ind::roverIndividual)
+  @eval fn(rs::RockSample.RS) = $(ind.code)
+  gamma = fn(rs)
 
-  for i in collect(1:8)
-    if !is_collected[i]
-      d = abs(rs.Robot.x - rs.Rocks[i].x) + abs(rs.Robot.y - rs.Rocks[i].y)
-      nu = 2^(-d/rs.d0)
-      accuracy = 0.5 + 0.5*nu
-
-      if accuracy > lambda && check(rs,i) == "Good"
-        distances[i] = d
-      end
-
-    end
+  if typeof(gamma) != Float64
+    rs.Reward = -Inf
+    return
   end
 
-  if minimum(distances) == Inf
-    return 0
-  else
-    return indmin(distances)
-  end
-  
-end
+  is_collected = falses(8)
+  steplimit = 50
 
-# function to move robot to rock to sample it
-function collect_rock(rs::RS, rock, steplimit)
-  while(rs.Steps <= steplimit)
+  while(!rs.Terminated && rs.Steps <= steplimit)
+    # find closest rock that hasn't been collected and is above threshold
+    nearest_rock = GE_PolicyFunctions.find_valid_rock2(rs, is_collected, gamma)
 
-    dx = rs.Robot.x - rs.Rocks[rock].x
-    dy = rs.Robot.y - rs.Rocks[rock].y
+    # make sure there is a valid rock
+    if nearest_rock > 0
 
-    if dx < 0
-      move(rs,"East")
-    elseif dx > 0
-      move(rs,"West")
-    elseif dy < 0
-      move(rs,"South")
-    elseif dy > 0
-      move(rs,"North")
-    end
+      # collect rock
+      is_collected[nearest_rock] = GE_PolicyFunctions.collect_rock(rs, nearest_rock, steplimit)
 
-    if rs.Robot.x == rs.Rocks[rock].x && rs.Robot.y == rs.Rocks[rock].y
-      sample(rs)
-      return true
+    # if none, move to exit
+    else
+      RockSample.move(rs,"East")
     end
 
   end
-
-  return false
-
-end
-
-# function to make a RockSample copy 
-function copyRS(rs::RS)
-  rs_copy = RSinit();
-  rs_copy.Rocks = rs.Rocks # don't reinitialize the rocks randomly every evaluation call
-  return rs_copy
+  return
 end
 
 # evaluation function to determine fitness
@@ -274,10 +251,11 @@ function evaluate!(grammar::Grammar, ind::roverIndividual)
   # generate code
   try
     ind.code = transform(grammar, ind)
-    #@eval fn(rs::RS, ind::roverIndividual) = $(ind.code)
-    #@eval fn(rs::RS, ind::roverIndividual) = policy_wrapper1(rs, ind)
-    #@eval fn(rs::RS, ind::roverIndividual) = policy_wrapper2(rs, ind)
-    @eval fn(rs::RS, ind::roverIndividual) = policy_wrapper3(rs, ind)
+    @eval fn(rs::RockSample.RS, ind::roverIndividual) = $(ind.code)
+    #@eval fn(rs::RockSample.RS, ind::roverIndividual) = policy_wrapper1(rs, ind)
+    #@eval fn(rs::RockSample.RS, ind::roverIndividual) = policy_wrapper2(rs, ind)
+    #@eval fn(rs::RockSample.RS, ind::roverIndividual) = policy_wrapper3(rs, ind)
+    #@eval fn(rs::RockSample.RS, ind::roverIndividual) = policy_wrapper4(rs, ind)
   catch e
     #if typeof(e) !== MaxWrapException
     #  Base.error_show(STDERR, e, catch_backtrace())
@@ -286,16 +264,17 @@ function evaluate!(grammar::Grammar, ind::roverIndividual)
     return
   end
 
-  n_games = 50  
+  n_games = 50
   total = 0
   # run code
-  # average over multiple instances
+  # averaged over multiple games
   for i = 1:n_games
     # generate new instance
-    rs = RSinit();
-    max_reward = getMaxReward(rs)
+    rs = RockSample.RSinit();
+    max_reward = RockSample.getMaxReward(rs)
 
     # evaluate instance
+    # fn(rs, ind)
     fn(rs, ind)
 
     # get reward
@@ -303,10 +282,73 @@ function evaluate!(grammar::Grammar, ind::roverIndividual)
 
   end
 
-  #ind.fitness = convert(Float64, rs.Reward) / rs.RewardMax
-  ind.fitness = total / n_games
+  avg_reward = total / n_games
 
-  #return ind.fitness / rs.RewardMax
+  code_string = convert(ASCIIString,string(ind.code))
+  sub_strings = split(code_string,"\n")
+  program_length = length(sub_strings) - 2
+
+  if program_length > 25
+    avg_reward -= 0.1
+  end
+  
+  ind.fitness = avg_reward
+end
+
+function ParseCode(code)
+  # break up the code into strings without spaces
+  code_string = convert(ASCIIString,string(code))
+  sub_strings = split(code_string,"\n")
+  for i = 1:length(sub_strings)
+    sub_strings[i] = strip(sub_strings[i])
+  end
+
+  # list of valid actions
+  valid = ["North", "East", "South", "West", "sample", "check", "if", "end"]
+  total_strings = length(sub_strings)
+
+  line = 2
+  input_list = ASCIIString[]
+  while line <= total_strings - 1
+
+    push!(input_list, sub_strings[line])
+
+    #for j = 1:length(valid)
+    #  string = sub_strings[line]
+    #  res = search(string, valid[j])
+
+     # if isempty(convert(Array,res))
+     #   continue
+     # end
+
+      #if valid[j] == "check"
+      #  for i = 1:8
+      #    res = search(string,"$(i)")
+      #
+      #    if isempty(convert(Array,res))
+      #      continue
+      #    end
+      #
+      #    push!(input_list, "$(check)/$(i)")
+      #  end
+      #  continue
+      #end
+
+      #if valid[j] == "if"
+      #  push!(input_list, "$(valid[j])/$(string[4:end])")
+      #  continue
+      #end
+
+      #push!(input_list, valid[j])
+
+    #end
+    line += 1
+
+  end
+
+  println(input_list)
+
+  return input_list
 end
 
 # need to redefine 'isless' (more reward is better)
@@ -319,16 +361,18 @@ function main()
   #println("Max possible reward: $(rs.RewardMax)")
 
   # create population
-  pop = roverPopulation(500, 500)
+  # X individuals with genome Y elements long
+  pop = roverPopulation(500,500)
 
   fitness = 0
   generation = 1
+  max_generation = 25
 
-  println("Starting algorithm ...")
+  println("[GE_rover] Starting grammatical evolution ...")
 
   #evaluate!(rover_grammar, pop, rs)
   evaluate!(rover_grammar, pop)
-  while generation <= 25
+  while generation <= max_generation
     # generate a new population (based off of fitness)
     pop = generate(rover_grammar, pop, 0.1, 0.2, 0.2)
 
@@ -336,10 +380,25 @@ function main()
     fitness = pop[1].fitness
     println("-------------------------------------------------------------")
     println("generation: $generation, $(length(pop)), max fitness=$fitness\n$(pop[1].code)")
+
+    code_string = convert(ASCIIString,string(pop[1].code))
+    sub_strings = split(code_string,"\n")
+    program_length = length(sub_strings) - 2
+    println("Program length: $(program_length)")
+
+
+    #input_list = ParseCode(pop[1].code)
+    #print(input_list)
+    #println(pop[1].genome)
+    #println(pop[1].code[1])
+    #println(dump(pop[1].code))
+    #println(length(pop[1].code.args))
     generation += 1
   end
 
-  println("Done!")
+  println("[GE_rover] Finished policy evolution")
+
+  # 
 
 end
 

@@ -102,13 +102,15 @@ function move(RS, direction)
 end
 
 function sample(RS)
-    for r in RS.Rocks
+    for (i,r) in enumerate(RS.Rocks)
         if r.x == RS.Robot.x && r.y == RS.Robot.y
             if r.value == "Bad"
                 RS.Reward -= 10
+                RS.Belief[i] = 0
             else
                 RS.Reward += 10
                 r.value = "Bad"
+                RS.Belief[i] = 0
             end
         end
     end
@@ -125,16 +127,34 @@ function check(RS, number)
     pco = 0.5 + nu*0.5
     if rand() > pco
         if rock.value == "Good"
+            updatebelief(RS,number,pco,"Bad")
             RS.Steps += 1
             return "Bad"
         elseif rock.value == "Bad"
+            updatebelief(RS,number,pco,"Good")
             RS.Steps += 1
             return "Good"
         end
     else
+        updatebelief(RS,number,pco,rock.value)
         RS.Steps += 1
         return rock.value
     end            
+end
+
+# function to update the belief that a rock is good based on observation
+function updatebelief(rs::RS, number, prob, obs)
+    bt = rs.Belief[number]
+
+    if obs == "Bad"
+
+    elseif obs == "Good"
+
+    else
+        println("Bad observation input")
+    end
+
+    return
 end
 
 # Function that returns the max reward possible in the input rocksample instance
